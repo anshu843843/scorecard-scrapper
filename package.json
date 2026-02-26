@@ -1,0 +1,17 @@
+{
+  "name": "scorecard-scrape",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fetch Sportradar scorecard feeds and cache them in Redis.",
+  "main": "scorecard_flow.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node scorecard_flow.js",
+    "help": "node scorecard_flow.js --help"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}
+
