@@ -153,6 +153,28 @@ function formatScoreLine(homeScore, awayScore, separator = "-") {
   return `${home}${separator}${away}`;
 }
 
+function formatTennisDisplayScore(homeSets, awaySets, sets) {
+  const normalizedSets = Array.isArray(sets) ? sets : [];
+  const latestSet = [...normalizedSets]
+    .reverse()
+    .find(
+      (set) =>
+        set &&
+        (set.home !== null && set.home !== undefined) &&
+        (set.away !== null && set.away !== undefined),
+    );
+
+  if (latestSet) {
+    const displayHomeSets =
+      homeSets !== null && homeSets !== undefined ? homeSets : "?";
+    const displayAwaySets =
+      awaySets !== null && awaySets !== undefined ? awaySets : "?";
+    return `(${displayHomeSets}) ${latestSet.home} - ${latestSet.away} (${displayAwaySets})`;
+  }
+
+  return formatScoreLine(homeSets, awaySets);
+}
+
 function resolveSideEntity(match, side, payload) {
   return firstValue(
     getPath(match, ["teams", side]),
@@ -545,7 +567,7 @@ function normalizeTennisScore(match, payload, eventId) {
       name: resolveSideName(awayEntity, "Player 2"),
       score: awayScore,
     },
-    score: formatScoreLine(homeScore, awayScore),
+    score: formatTennisDisplayScore(homeScore, awayScore, sets),
     details: cleanValue({
       sets,
       currentGame,
@@ -589,7 +611,11 @@ function normalizeTennisStateScore(state, eventId) {
       name: "Away",
       score: awayScore,
     },
-    score: formatScoreLine(homeScore, awayScore),
+    score: formatTennisDisplayScore(
+      homeScore,
+      awayScore,
+      setsWithMeta.length ? setsWithMeta : sets,
+    ),
     details: cleanValue({
       sets: setsWithMeta.length ? setsWithMeta : sets,
       serving: detectServingSide(state.serving, null, null) || toText(state.serving),
