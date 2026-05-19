@@ -414,13 +414,81 @@ function formatCricketInnings(innings) {
   );
 }
 
+function normalizeComparableText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseCricketMatchTitleTeams(matchTitle) {
+  const title = toText(matchTitle);
+  if (!title) return [];
+
+  const cleaned = title.replace(/\s+\([^)]*\)\s*$/, "").trim();
+  const simpleSplit = cleaned.split(/\s+v(?:s|\.)?\s+/i);
+  if (simpleSplit.length >= 2) {
+    return simpleSplit
+      .slice(0, 2)
+      .map((part) => toText(part))
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function findLatestCricketInningsForTeam(innings, teamName) {
+  const targetName = normalizeComparableText(teamName);
+  if (!targetName) return null;
+
+  let fallback = null;
+  for (const inningsItem of innings) {
+    const inningsTeamName = toText(inningsItem && inningsItem.teamName);
+    if (!inningsTeamName) continue;
+    const normalizedInningsName = normalizeComparableText(inningsTeamName);
+    if (normalizedInningsName === targetName) {
+      fallback = inningsItem;
+      continue;
+    }
+    if (
+      normalizedInningsName.includes(targetName) ||
+      targetName.includes(normalizedInningsName)
+    ) {
+      fallback = inningsItem;
+    }
+  }
+  return fallback;
+}
+
+function buildCricketSide(teamName, inningsItem, fallbackName) {
+  if (!teamName && !inningsItem) return undefined;
+  return cleanObject({
+    name: teamName || resolveSideName(inningsItem, fallbackName),
+    score: inningsItem ? formatCricketInnings(inningsItem) : null,
+    runs: inningsItem ? toNumber(inningsItem.runs) : null,
+    wickets: inningsItem ? toNumber(inningsItem.wickets) : null,
+    overs: inningsItem ? toNumber(inningsItem.overs) : null,
+  });
+}
+
 function normalizeCricketScore(payload, eventId) {
   const score = findCricketScore(payload);
   if (!score) return null;
 
   const innings = Array.isArray(score.innings) ? score.innings : [];
-  const firstInnings = innings[0] || null;
-  const secondInnings = innings[1] || null;
+  const titleTeams = parseCricketMatchTitleTeams(score.matchTitle);
+  const firstTitleTeam = titleTeams[0] || null;
+  const secondTitleTeam = titleTeams[1] || null;
+
+  const firstInnings =
+    findLatestCricketInningsForTeam(innings, firstTitleTeam) || innings[0] || null;
+  const secondInnings =
+    findLatestCricketInningsForTeam(innings, secondTitleTeam) || innings[1] || null;
+  const targetInnings =
+    [...innings].reverse().find((item) => toNumber(item && item.target) !== null) ||
+    secondInnings;
 
   return cleanObject({
     eventId: String(eventId),
@@ -430,24 +498,16 @@ function normalizeCricketScore(payload, eventId) {
       toText(score.matchTitle),
       score.matchStatus !== undefined ? String(score.matchStatus) : null,
     ),
-    home: firstInnings
-      ? {
-          name: resolveSideName(firstInnings, "Team 1"),
-          score: formatCricketInnings(firstInnings),
-          runs: toNumber(firstInnings.runs),
-          wickets: toNumber(firstInnings.wickets),
-          overs: toNumber(firstInnings.overs),
-        }
-      : undefined,
-    away: secondInnings
-      ? {
-          name: resolveSideName(secondInnings, "Team 2"),
-          score: formatCricketInnings(secondInnings),
-          runs: toNumber(secondInnings.runs),
-          wickets: toNumber(secondInnings.wickets),
-          overs: toNumber(secondInnings.overs),
-        }
-      : undefined,
+    home: buildCricketSide(
+      firstTitleTeam,
+      firstInnings,
+      firstTitleTeam || "Team 1",
+    ),
+    away: buildCricketSide(
+      secondTitleTeam,
+      secondInnings,
+      secondTitleTeam || "Team 2",
+    ),
     score: [
       firstInnings ? formatCricketInnings(firstInnings) : null,
       secondInnings ? formatCricketInnings(secondInnings) : null,
@@ -456,7 +516,7 @@ function normalizeCricketScore(payload, eventId) {
       .join(" vs "),
     details: cleanValue({
       currentInnings: toNumber(score.currentInningsNumber),
-      target: secondInnings ? toNumber(secondInnings.target) : null,
+      target: targetInnings ? toNumber(targetInnings.target) : null,
       summary: toText(score.matchTitle),
     }),
   });
