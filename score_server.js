@@ -640,7 +640,8 @@ function parseRequestedEventIds(rawValue, maxItems = 50) {
   if (!items.length) {
     return createResponseEnvelope(400, {
       error: "Missing eventId",
-      expected: "/get-score/:eventId or /get-score/:eventId1,:eventId2",
+      expected:
+        "/get-score/:eventId, /get-score/:eventId1,:eventId2, /get-event-data/:eventId",
     });
   }
 
@@ -713,7 +714,42 @@ async function loadScoreEnvelope(redis, eventId) {
   }
 }
 
-function createScoreCache(redis, options = {}) {
+async function loadEventDataEnvelope(redis, eventId) {
+  const key = `scorecard_data:sky:${eventId}`;
+
+  let raw;
+  try {
+    raw = await redis.get(key);
+  } catch (err) {
+    return createResponseEnvelope(500, {
+      error: "Redis read failed",
+      detail: formatError(err),
+    });
+  }
+
+  if (!raw) {
+    return createResponseEnvelope(404, {
+      error: "Event data not found",
+      eventId,
+      key,
+    });
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return createResponseEnvelope(500, {
+      error: "Stored payload is not valid JSON",
+      eventId,
+      detail: formatError(err),
+    });
+  }
+
+  return createResponseEnvelope(200, parsed);
+}
+
+function createEventCache(loadEnvelope, options = {}) {
   const cacheTtlMs = Math.max(
     0,
     Math.floor(toNumber(options.cacheTtlMs) ?? 1000),
@@ -761,7 +797,7 @@ function createScoreCache(redis, options = {}) {
     const existing = inFlight.get(eventId);
     if (existing) return existing;
 
-    const promise = loadScoreEnvelope(redis, eventId)
+    const promise = loadEnvelope(eventId)
       .then((envelope) => {
         if (envelope.statusCode === 200) {
           setCached(eventId, envelope, cacheTtlMs);
@@ -785,6 +821,20 @@ function createScoreCache(redis, options = {}) {
   };
 }
 
+function createScoreCache(redis, options = {}) {
+  return createEventCache(
+    (eventId) => loadScoreEnvelope(redis, eventId),
+    options,
+  );
+}
+
+function createEventDataCache(redis, options = {}) {
+  return createEventCache(
+    (eventId) => loadEventDataEnvelope(redis, eventId),
+    options,
+  );
+}
+
 function batchResultFromEnvelope(eventId, envelope) {
   if (envelope.statusCode === 200) {
     return envelope.body;
@@ -796,7 +846,33 @@ function batchResultFromEnvelope(eventId, envelope) {
   };
 }
 
-function createRequestHandler(scoreCache) {
+async function handleEventRequest({
+  res,
+  rawIds,
+  cache,
+  maxBatchItems,
+  batchConcurrency,
+}) {
+  const parsedIds = parseRequestedEventIds(rawIds, maxBatchItems);
+  if (parsedIds.statusCode !== 200) {
+    writeJson(res, parsedIds.statusCode, parsedIds.body);
+    return;
+  }
+
+  const eventIds = parsedIds.body;
+  if (eventIds.length === 1) {
+    const envelope = await cache.get(eventIds[0]);
+    writeJson(res, envelope.statusCode, envelope.body);
+    return;
+  }
+
+  const results = await mapLimit(eventIds, batchConcurrency, async (eventId) =>
+    batchResultFromEnvelope(eventId, await cache.get(eventId)),
+  );
+  writeJson(res, 200, results);
+}
+
+function createRequestHandler(scoreCache, eventDataCache) {
   const maxBatchItems = Math.max(
     1,
     Math.floor(toNumber(process.env.SCORE_BATCH_MAX_ITEMS) ?? 50),
@@ -814,35 +890,36 @@ function createRequestHandler(scoreCache) {
       return;
     }
 
-    const match = requestUrl.pathname.match(/^\/get-score\/([^/]+)\/?$/);
-    if (!match) {
-      writeJson(res, 404, {
-        error: "Route not found",
-        expected: "/get-score/:eventId",
+    const scoreMatch = requestUrl.pathname.match(/^\/get-score\/([^/]+)\/?$/);
+    if (scoreMatch) {
+      await handleEventRequest({
+        res,
+        rawIds: decodeURIComponent(scoreMatch[1]),
+        cache: scoreCache,
+        maxBatchItems,
+        batchConcurrency,
       });
       return;
     }
 
-    const parsedIds = parseRequestedEventIds(
-      decodeURIComponent(match[1]),
-      maxBatchItems,
+    const eventDataMatch = requestUrl.pathname.match(
+      /^\/get-event-data\/([^/]+)\/?$/,
     );
-    if (parsedIds.statusCode !== 200) {
-      writeJson(res, parsedIds.statusCode, parsedIds.body);
+    if (eventDataMatch) {
+      await handleEventRequest({
+        res,
+        rawIds: decodeURIComponent(eventDataMatch[1]),
+        cache: eventDataCache,
+        maxBatchItems,
+        batchConcurrency,
+      });
       return;
     }
 
-    const eventIds = parsedIds.body;
-    if (eventIds.length === 1) {
-      const envelope = await scoreCache.get(eventIds[0]);
-      writeJson(res, envelope.statusCode, envelope.body);
-      return;
-    }
-
-    const results = await mapLimit(eventIds, batchConcurrency, async (eventId) =>
-      batchResultFromEnvelope(eventId, await scoreCache.get(eventId)),
-    );
-    writeJson(res, 200, results);
+    writeJson(res, 404, {
+      error: "Route not found",
+      expected: "/get-score/:eventId or /get-event-data/:eventId",
+    });
   };
 }
 
@@ -864,7 +941,17 @@ async function startServer() {
     missTtlMs: process.env.SCORE_CACHE_MISS_TTL_MS,
     maxEntries: process.env.SCORE_CACHE_MAX_ENTRIES,
   });
-  const requestHandler = createRequestHandler(scoreCache);
+  const eventDataCache = createEventDataCache(redis, {
+    cacheTtlMs:
+      process.env.EVENT_DATA_CACHE_TTL_MS || process.env.SCORE_CACHE_TTL_MS,
+    missTtlMs:
+      process.env.EVENT_DATA_CACHE_MISS_TTL_MS ||
+      process.env.SCORE_CACHE_MISS_TTL_MS,
+    maxEntries:
+      process.env.EVENT_DATA_CACHE_MAX_ENTRIES ||
+      process.env.SCORE_CACHE_MAX_ENTRIES,
+  });
+  const requestHandler = createRequestHandler(scoreCache, eventDataCache);
 
   const host = process.env.SCORE_SERVER_HOST || "0.0.0.0";
   const port = Number(process.env.SCORE_SERVER_PORT || process.env.PORT || 3000);
@@ -901,9 +988,13 @@ if (require.main === module) {
 }
 
 module.exports = {
+  createEventCache,
+  createEventDataCache,
   createScoreCache,
   createRequestHandler,
   createResponseEnvelope,
+  handleEventRequest,
+  loadEventDataEnvelope,
   loadScoreEnvelope,
   normalizeCricketScore,
   normalizeScorePayload,
