@@ -7,11 +7,12 @@
   "type": "commonjs",
   "scripts": {
     "start": "node scorecard_flow.js",
-    "help": "node scorecard_flow.js --help"
+    "help": "node scorecard_flow.js --help",
+    "server": "node score_server.js",
+    "all": "node run_both.js"
   },
   "engines": {
     "node": ">=18"
   },
   "license": "UNLICENSED"
 }
-

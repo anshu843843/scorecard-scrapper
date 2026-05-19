@@ -1090,8 +1090,22 @@ async function main() {
   return runOnceCli(args);
 }
 
-main().catch((err) => {
-  process.stderr.write((err && err.stack) || String(err));
-  process.stderr.write("\n");
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((err) => {
+    process.stderr.write((err && err.stack) || String(err));
+    process.stderr.write("\n");
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  CookieJar,
+  RedisClient,
+  feedPathForIframeType,
+  fetchScorecardOnce,
+  formatError,
+  getRedisUrl,
+  loadDotEnv,
+  nowIso,
+  parseScoreIframeUrl,
+};
