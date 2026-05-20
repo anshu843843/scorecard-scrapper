@@ -409,9 +409,7 @@ function formatCricketInnings(innings) {
   return firstValue(
     toText(innings.summary),
     runs !== null && wickets !== null
-      ? wickets >= 10
-        ? `${runs} All Out`
-        : `${runs}/${wickets}`
+      ? `${runs}/${wickets}`
       : runs !== null
         ? String(runs)
         : null,
