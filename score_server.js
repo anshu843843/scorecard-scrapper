@@ -465,12 +465,21 @@ function findLatestCricketInningsForTeam(innings, teamName) {
 
 function buildCricketSide(teamName, inningsItem, fallbackName) {
   if (!teamName && !inningsItem) return undefined;
+  if (!inningsItem) {
+    return cleanObject({
+      name: teamName || fallbackName,
+      score: "0/0",
+      runs: 0,
+      wickets: 0,
+      overs: 0,
+    });
+  }
   return cleanObject({
     name: teamName || resolveSideName(inningsItem, fallbackName),
-    score: inningsItem ? formatCricketInnings(inningsItem) : null,
-    runs: inningsItem ? toNumber(inningsItem.runs) : null,
-    wickets: inningsItem ? toNumber(inningsItem.wickets) : null,
-    overs: inningsItem ? toNumber(inningsItem.overs) : null,
+    score: formatCricketInnings(inningsItem),
+    runs: toNumber(inningsItem.runs),
+    wickets: toNumber(inningsItem.wickets),
+    overs: toNumber(inningsItem.overs),
   });
 }
 
@@ -483,13 +492,33 @@ function normalizeCricketScore(payload, eventId) {
   const firstTitleTeam = titleTeams[0] || null;
   const secondTitleTeam = titleTeams[1] || null;
 
-  const firstInnings =
-    findLatestCricketInningsForTeam(innings, firstTitleTeam) || innings[0] || null;
-  const secondInnings =
-    findLatestCricketInningsForTeam(innings, secondTitleTeam) || innings[1] || null;
+  const matchedFirstInnings = findLatestCricketInningsForTeam(
+    innings,
+    firstTitleTeam,
+  );
+  const matchedSecondInnings = findLatestCricketInningsForTeam(
+    innings,
+    secondTitleTeam,
+  );
+  const firstInnings = firstTitleTeam
+    ? matchedFirstInnings
+    : innings[0] || null;
+  const secondInnings = secondTitleTeam
+    ? matchedSecondInnings
+    : innings[1] || null;
   const targetInnings =
     [...innings].reverse().find((item) => toNumber(item && item.target) !== null) ||
     secondInnings;
+  const homeSide = buildCricketSide(
+    firstTitleTeam,
+    firstInnings,
+    firstTitleTeam || "Team 1",
+  );
+  const awaySide = buildCricketSide(
+    secondTitleTeam,
+    secondInnings,
+    secondTitleTeam || "Team 2",
+  );
 
   return cleanObject({
     eventId: String(eventId),
@@ -499,20 +528,9 @@ function normalizeCricketScore(payload, eventId) {
       toText(score.matchTitle),
       score.matchStatus !== undefined ? String(score.matchStatus) : null,
     ),
-    home: buildCricketSide(
-      firstTitleTeam,
-      firstInnings,
-      firstTitleTeam || "Team 1",
-    ),
-    away: buildCricketSide(
-      secondTitleTeam,
-      secondInnings,
-      secondTitleTeam || "Team 2",
-    ),
-    score: [
-      firstInnings ? formatCricketInnings(firstInnings) : null,
-      secondInnings ? formatCricketInnings(secondInnings) : null,
-    ]
+    home: homeSide,
+    away: awaySide,
+    score: [homeSide && homeSide.score, awaySide && awaySide.score]
       .filter(Boolean)
       .join(" vs "),
     details: cleanValue({
