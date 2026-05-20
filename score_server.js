@@ -407,12 +407,11 @@ function formatCricketInnings(innings) {
   const wickets = toNumber(innings && innings.wickets);
   const runs = toNumber(innings && innings.runs);
   return firstValue(
-    toText(innings.summary),
     runs !== null && wickets !== null
       ? `${runs}/${wickets}`
       : runs !== null
         ? String(runs)
-        : null,
+        : toText(innings.summary),
   );
 }
 
