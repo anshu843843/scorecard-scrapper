@@ -404,12 +404,16 @@ function findCricketScore(payload) {
 }
 
 function formatCricketInnings(innings) {
+  const wickets = toNumber(innings && innings.wickets);
+  const runs = toNumber(innings && innings.runs);
   return firstValue(
     toText(innings.summary),
-    innings.runs !== undefined && innings.wickets !== undefined
-      ? `${innings.runs}/${innings.wickets}`
-      : innings.runs !== undefined
-        ? String(innings.runs)
+    runs !== null && wickets !== null
+      ? wickets >= 10
+        ? `${runs} All Out`
+        : `${runs}/${wickets}`
+      : runs !== null
+        ? String(runs)
         : null,
   );
 }
